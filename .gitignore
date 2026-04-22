@@ -1,0 +1,25 @@
+# Environment and secrets
+.env
+*.env
+
+# Python virtual environment
+venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Backtest results (large JSON)
+*.json
