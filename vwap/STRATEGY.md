@@ -57,15 +57,14 @@ This two-step confirmation filters out random VWAP crosses and only enters when 
 - Minimum stop-loss of **10 points** (prevents tiny SLs on low-premium options)
 - SL is monitored on 1-minute candles for precision
 
-### 6. Side Locking
+### 6. Independent Sides
 
-- Only **one side** (CE or PE) can be active at a time
-- This means only one of these can exist simultaneously:
-  - Pending CE trigger
-  - Pending PE trigger
-  - Active CE short trade
-  - Active PE short trade
-- When a trade exits (SL or time), the other side can trigger
+- CE and PE run as **independent** trigger/entry/SL cycles
+- Both sides can be active simultaneously
+- A CE trade getting stopped out does not affect the PE side, and vice versa
+- Each side independently scans for VWAP triggers, confirms entries, and monitors SL
+
+> **Note:** An earlier version used side locking (only one side active at a time). Backtesting showed independent sides produces 49% more PnL with nearly half the drawdown, because side locking starved the PE side of trades.
 
 ### 7. Time Rules
 

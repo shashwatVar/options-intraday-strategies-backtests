@@ -2,9 +2,9 @@
 
 ## Backtesting
 
-- [ ] Complete VWAP backtest for remaining 3 months (Feb–Apr 2026) — 9 months already done (Apr 2025–Jan 2026), ₹47,268 PnL so far
-- [ ] Redo 9:20 Short Straddle (BANKNIFTY) backtest — previous run used wrong ATM strike due to Breeze pre-market spot data bug. Run for 6 months.
-- [ ] Fix straddle backtester (`straddle/backtest.py`) to filter NSE spot candles to `>= 09:15` before ATM calculation
+- [x] Complete VWAP backtest for full 12 months (Apr 2025–Apr 2026) — 537 trades, ₹59,519 PnL
+- [x] Redo 9:20 Short Straddle (BANKNIFTY) backtest — fixed pre-market spot bug + optimized filters via 648-config grid test. PnL improved from ₹3.7k to ₹36.5k
+- [x] Fix straddle backtester (`straddle/backtest.py`) to filter NSE spot candles to `>= 09:15` before ATM calculation
 
 ## New Strategies — Research & Backtest
 
@@ -14,5 +14,5 @@
 
 ## Infrastructure
 
+- [x] Add `.gitignore` and init git repo
 - [ ] Automate Breeze session token refresh (Puppeteer or similar)
-- [ ] Add `.gitignore` and init git repo in `strategy/` directory

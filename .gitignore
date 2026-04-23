@@ -23,3 +23,6 @@ logs/
 
 # Backtest results (large JSON)
 *.json
+
+# API response cache
+cache/

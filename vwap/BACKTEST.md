@@ -2,9 +2,7 @@
 
 ## Test Period
 
-April 22, 2025 – January 7, 2026 (~9 months)
-
-> Note: Backtest was truncated at Jan 2026 due to Breeze API daily call limit (5000/day). Full 12-month run pending. Results below are for the 9-month period. Annualized estimates are extrapolated.
+April 22, 2025 – April 21, 2026 (12 months)
 
 ## Data Source
 
@@ -18,58 +16,73 @@ April 22, 2025 – January 7, 2026 (~9 months)
 
 The ATM reference strike was previously computed from a pre-market junk candle (07:16 timestamp with previous day's close). This caused wrong ATM strikes, especially on gap days (up to 224 points off = 4 strikes wrong). Fixed by filtering NSE spot data to `>= 09:15` before selecting the reference candle.
 
-Impact of fix:
-- PnL improved from ₹19,040 (12 months, wrong ATM) to **₹47,268 (9 months, correct ATM)**
-- Max drawdown reduced from ₹55,508 to **₹19,320**
+## Side Locking vs Independent Sides
 
-## Performance Summary
+| Metric | Side Locked | Independent Sides |
+|---|---|---|
+| Trades | 537 | 694 |
+| Win rate | 30.5% | 28.7% |
+| Total PnL | ₹+59,519 | ₹+88,722 |
+| Avg win | ₹+2,281 | ₹+2,616 |
+| Avg loss | ₹-843 | ₹-873 |
+| Max drawdown | ₹42,360 | ₹24,518 |
+| CE PnL | ₹42,204 | ₹46,754 |
+| PE PnL | ₹17,315 | ₹41,969 |
+
+Independent sides is strictly better — 49% more PnL with nearly half the drawdown. Side locking was starving the PE side of trades.
+
+## Performance Summary (Independent Sides)
 
 | Metric | Value |
 |---|---|
-| Total trades | 366 |
-| Win rate | 33.1% (121W / 245L) |
-| Total PnL | ₹+47,268 |
-| Avg win | ₹+1,645 |
-| Avg loss | ₹-620 |
-| Max drawdown | ₹19,320 |
-| Days traded | 140 out of 196 eligible |
-| Annualized PnL (extrapolated) | ~₹63,000 |
+| Total trades | 694 |
+| Win rate | 28.7% (199W / 495L) |
+| Total PnL | ₹+88,722 |
+| Avg win | ₹+2,616 |
+| Avg loss | ₹-873 |
+| Best trade | ₹+13,162 |
+| Worst trade | ₹-5,539 |
+| Max drawdown | ₹24,518 |
+| Days traded | 190 out of 243 |
 
 ## Exit Breakdown
 
 | Exit Type | Trades | PnL |
 |---|---|---|
-| TIME_EXIT (15:15) | 125 (34%) | ₹+198,778 |
-| SL_HIT | 241 (66%) | ₹-151,510 |
+| TIME_EXIT (15:15) | 208 (30%) | ₹+518,061 |
+| SL_HIT | 486 (70%) | ₹-429,339 |
 
-The strategy loses on most trades (66% hit SL) but the average win is **2.65× the average loss**, making it net profitable.
+The strategy loses on most trades (70% hit SL) but the average win is **3.0× the average loss**, making it net profitable.
 
 ## Side Breakdown
 
 | Side | Trades | PnL |
 |---|---|---|
-| CE (call sells) | 201 | ₹+34,940 |
-| PE (put sells) | 165 | ₹+12,328 |
+| CE (call sells) | 342 | ₹+46,754 |
+| PE (put sells) | 352 | ₹+41,969 |
 
-CE side is significantly more profitable — call options tend to decay faster in rising markets (2025 was mostly bullish).
+Both sides are now well-balanced with independent operation.
 
 ## Monthly Breakdown
 
 | Month | Trades | PnL | W/L |
 |---|---|---|---|
-| Apr 2025 | 9 | +₹5,816 | 6W 3L |
-| May 2025 | 63 | -₹4,899 | 12W 51L |
-| Jun 2025 | 36 | +₹8,319 | 16W 20L |
-| Jul 2025 | 42 | +₹3,218 | 14W 28L |
-| Aug 2025 | 47 | +₹5,541 | 15W 32L |
-| Sep 2025 | 32 | +₹11,835 | 14W 18L |
-| Oct 2025 | 18 | +₹12,975 | 13W 26L |
-| Nov 2025 | 45 | -₹10,211 | 11W 34L |
-| Dec 2025 | 40 | +₹16,106 | 17W 23L |
-| Jan 2026 | 13 | -₹1,432 | 3W 10L |
-| **Total** | **366** | **+₹47,268** | **121W 245L** |
+| Apr 2025 | 17 | +₹5,166 | 8W 9L |
+| May 2025 | 70 | +₹66 | 18W 52L |
+| Jun 2025 | 56 | +₹8,352 | 19W 37L |
+| Jul 2025 | 58 | +₹4,768 | 19W 39L |
+| Aug 2025 | 55 | +₹5,052 | 15W 40L |
+| Sep 2025 | 60 | +₹8,640 | 20W 40L |
+| Oct 2025 | 49 | +₹15,195 | 15W 34L |
+| Nov 2025 | 51 | -₹9,075 | 11W 40L |
+| Dec 2025 | 62 | +₹12,210 | 19W 43L |
+| Jan 2026 | 63 | -₹10,699 | 15W 48L |
+| Feb 2026 | 52 | +₹17,602 | 17W 35L |
+| Mar 2026 | 57 | +₹25,759 | 13W 44L |
+| Apr 2026 | 44 | +₹5,685 | 10W 34L |
+| **Total** | **694** | **+₹88,722** | **199W 495L** |
 
-Green months: 7 out of 10 (70%).
+Green months: 11 out of 13 (85%).
 
 ## Comparison with Live Trader
 
@@ -78,19 +91,9 @@ A trader running the same strategy (from their published spreadsheet) reported:
 - **Sep 2025–Apr 2026** (2 lots): ₹153,160 total
 - **Win rate**: 62-64%
 
-Our backtest shows lower results primarily due to:
-1. **SL monitoring granularity** — we check SL at 2-min candle boundaries, live trading checks tick-by-tick. Many borderline SL hits in our backtest would survive in live trading.
-2. **Side locking** — our implementation allows only one active side at a time. The trader likely runs CE and PE independently.
-
-Expected real-world performance is between our backtest (floor) and the trader's results (ceiling).
-
-## Estimated Annual Returns
-
-| Scenario | PnL/lot/year | ROI (₹1L margin) |
-|---|---|---|
-| Conservative (our backtest, annualized) | ~₹63,000 | ~63% |
-| Realistic (midpoint with trader) | ~₹95,000 | ~95% |
-| Optimistic (trader's actual) | ~₹166,000 | ~166% |
+With independent sides, our backtest (₹88.7k) is closer to the trader's results. Remaining gap is due to:
+1. **SL monitoring granularity** — we check SL at 2-min candle boundaries, live trading checks tick-by-tick
+2. **Entry precision** — live trading can enter at exact candle close, backtest uses aggregated data
 
 ## Bugs Found During Backtesting
 
@@ -98,15 +101,17 @@ Expected real-world performance is between our backtest (floor) and the trader's
 
 2. **Pre-market junk in NSE spot data** — Breeze returns ~120 flat candles from 07:15 for NSE spot, with previous day's close as OHLC. This corrupted ATM strike selection. Fix: filter candles to `>= 09:15`.
 
-Both fixes had massive impact on results.
+3. **Side locking suppressed PE trades** — Running CE and PE independently improved PnL by 49% and halved max drawdown. Fix: `INDEPENDENT_SIDES = True`.
 
 ## Backtester Details
 
 - **Script**: `strategy/vwap/backtest.py`
 - **Results**: `strategy/vwap/results.json`
+- **Cache**: `strategy/vwap/cache/` (API responses cached to filesystem)
 - **Venv**: `strategy/venv/` (shared)
 - **Env**: `strategy/.env` (shared Breeze credentials)
 - **Run**: `cd strategy/vwap && source ../venv/bin/activate && python backtest.py`
+- **Mode**: Set `INDEPENDENT_SIDES = True/False` in backtest.py to toggle
 
 ## NIFTY Regime
 

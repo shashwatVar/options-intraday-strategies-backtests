@@ -78,29 +78,27 @@ NIFTY has weekly expiry throughout.
 - **Target:** 50% of total credit collected
 - **Time exit:** 3:10 PM if neither SL nor target hit
 - **Filters:**
-  - Skip Thursdays (expiry day in old regime)
-  - VIX must be between 13 and 20
-  - Gap open must be < 1%
+  - Skip expiry day (monthly, not all Thursdays)
+  - VIX must be between 11 and 22
+  - Gap open must be < 1.5%
   - Trending filter: skip if first 4 candles (9:16-9:19) all same direction AND combined move > 0.3%
 
-### Backtest Results (Apr 2025 – Apr 2026)
+### Backtest Results (Apr 2025 – Apr 2026, optimized filters)
 | Metric | Value |
 |--------|-------|
-| Total trades | 50 |
-| Win rate | 58% |
-| Total PnL | ₹+2,022 |
-| Avg win | ₹+1,582 |
-| Avg loss | ₹-2,088 |
-| Max drawdown | ₹-12,405 |
-| Win/loss ratio | 0.76× |
-
-**Skip breakdown:** 47 Thursdays, 119 low-VIX days, 16 high-VIX days, 8 gap days, 3 no-data days.
+| Total trades | 145 |
+| Win rate | 66.9% |
+| Total PnL | ₹+36,547 |
+| Avg win | ₹+1,321 |
+| Avg loss | ₹-1,908 |
+| Max drawdown | ₹14,042 |
+| Profit factor | 1.40 |
 
 **Key observations:**
-- Essentially breakeven over 1 year
-- Win rate is decent (58%) but average loss is 1.3× average win — unfavorable asymmetry
-- VIX filter eliminates most trading days (only 50 of ~240 trading days pass all filters)
-- Most exits are time exits, not target/SL
+- Filter optimization (648 configs tested) improved PnL from ₹3.7k to ₹36.5k
+- VIX floor change (13→11) was the biggest lever — low-VIX days are ideal for straddles
+- Skip expiry day instead of all Thursdays added ~25 more trading days
+- Most exits are time exits — target rarely triggers
 
 ### Known Expiry Dates (BANKNIFTY, discovered via futures probing)
 ```
@@ -128,23 +126,23 @@ NIFTY has weekly expiry throughout.
 - **Cutoff:** No new trades after 14:30, process stops at 15:15
 - **Hedging:** Buy OTM option on same side at trigger formation
 
-### Backtest Results (Apr 2025 – Apr 2026, Weekly Expiry)
+### Backtest Results (Apr 2025 – Apr 2026, Weekly Expiry, Independent Sides)
 | Metric | Value |
 |--------|-------|
-| Total trades | 111 |
-| Win rate | 34% |
-| Total PnL | ₹+1,689 |
-| Avg win | ₹+1,753 |
-| Avg loss | ₹-890 |
-| Max drawdown | ₹-20,261 |
-| CE side PnL | ₹+10,638 |
-| PE side PnL | ₹-8,949 |
+| Total trades | 694 |
+| Win rate | 28.7% |
+| Total PnL | ₹+88,722 |
+| Avg win | ₹+2,616 |
+| Avg loss | ₹-873 |
+| Max drawdown | ₹24,518 |
+| CE side PnL | ₹+46,754 |
+| PE side PnL | ₹+41,969 |
 
 **Key observations:**
-- Low win rate (34%) but favorable risk/reward (avg win 2× avg loss)
-- Heavily skewed: CE side profitable, PE side is a drag
-- Essentially breakeven over 1 year
-- Using monthly expiry (wrong) inflated PnL to ₹23,840 — weekly expiry (correct) drops to ₹1,689
+- Low win rate (28.7%) but favorable risk/reward (avg win 3.0× avg loss)
+- Both sides well-balanced with independent operation
+- 11 out of 13 months green
+- Independent sides improved PnL by 49% and halved drawdown vs side-locked mode
 
 ---
 

@@ -12,9 +12,13 @@ load_dotenv("../.env")
 # ─── CONFIG (from VWAP_STRATEGY.md) ────────────────────────────────────────────
 MIN_SL = 10
 SKIP_WEEKDAYS = [3]  # Thursday
+INDEPENDENT_SIDES = True  # True = CE/PE trade independently, False = side locking (one at a time)
 
 FROM_DATE = "2025-04-22"
 TO_DATE = "2026-04-21"
+
+CACHE_DIR = "cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Lot size changed: 25 (pre Sep 2025) -> 75 (post Sep 2025)
 LOT_CHANGE_DATE = "2025-09-01"
@@ -59,10 +63,26 @@ api.generate_session(api_secret=os.getenv("BREEZE_SECRET"), session_token=os.get
 print("Connected to Breeze API")
 
 call_count = 0
+cache_hits = 0
+
+import hashlib
+
+def _cache_key(interval, from_d, to_d, stock_code, exchange, product, expiry, right, strike):
+    parts = [interval, from_d, to_d, stock_code, exchange, product, expiry or "", right, str(strike)]
+    key = "|".join(parts)
+    return os.path.join(CACHE_DIR, hashlib.md5(key.encode()).hexdigest() + ".json")
+
 
 def fetch(interval, from_d, to_d, stock_code="NIFTY", exchange="NFO",
           product="options", expiry=None, right="call", strike="0"):
-    global call_count
+    global call_count, cache_hits
+
+    ck = _cache_key(interval, from_d, to_d, stock_code, exchange, product, expiry, right, strike)
+    if os.path.exists(ck):
+        cache_hits += 1
+        with open(ck) as f:
+            return json.load(f)
+
     call_count += 1
     if call_count % 90 == 0:
         time.sleep(5)
@@ -72,7 +92,11 @@ def fetch(interval, from_d, to_d, stock_code="NIFTY", exchange="NFO",
             stock_code=stock_code, exchange_code=exchange, product_type=product,
             expiry_date=expiry or "", right=right, strike_price=str(strike),
         )
-        return r.get("Success") or []
+        result = r.get("Success") or []
+        if result:
+            with open(ck, "w") as f:
+                json.dump(result, f)
+        return result
     except:
         return []
 
@@ -128,8 +152,8 @@ def calc_vwap(candles_2min):
     return cum_pv / cum_vol if cum_vol > 0 else 0
 
 
-# ─── VWAP SIMULATION ──────────────────────────────────────────────────────────
-def simulate_vwap_day(ce_1m, pe_1m):
+# ─── VWAP SIMULATION (side-locked) ───────────────────────────────────────────
+def simulate_vwap_day_locked(ce_1m, pe_1m):
     ce_2m = aggregate_2min(ce_1m)
     pe_2m = aggregate_2min(pe_1m)
     if len(ce_2m) < 2 or len(pe_2m) < 2:
@@ -151,7 +175,6 @@ def simulate_vwap_day(ce_1m, pe_1m):
         if cur_time >= "14:30" and not active_trade:
             break
 
-        # Monitor active trade SL via 1-min candles
         if active_trade:
             side_map = ce_1m_map if active_trade["side"] == "CE" else pe_1m_map
             h, m = int(cur_time[:2]), int(cur_time[3:])
@@ -167,7 +190,7 @@ def simulate_vwap_day(ce_1m, pe_1m):
                     sl_hit = True
                     break
             if sl_hit:
-                pass  # Fall through to check for new triggers on this candle
+                pass
             elif cur_time >= "15:14":
                 exit_c = side_map.get("15:14") or side_map.get("15:15")
                 exit_p = float(exit_c["close"]) if exit_c else active_trade["entry"]
@@ -177,9 +200,8 @@ def simulate_vwap_day(ce_1m, pe_1m):
                 active_trade = active_side = None
                 continue
             else:
-                continue  # Trade still active, keep monitoring
+                continue
 
-        # Check pending trigger entry
         if pending and pending["expected_idx"] == idx:
             side = pending["side"]
             candle = ce_c if side == "CE" else pe_c
@@ -193,14 +215,12 @@ def simulate_vwap_day(ce_1m, pe_1m):
             else:
                 pending = None
                 active_side = None
-                # Fall through to trigger check
 
         if active_trade:
             continue
         if cur_time >= "14:30":
             break
 
-        # Check triggers on both sides
         for side, c2m in [("CE", ce_2m), ("PE", pe_2m)]:
             if idx >= len(c2m):
                 continue
@@ -212,7 +232,6 @@ def simulate_vwap_day(ce_1m, pe_1m):
                 active_side = side
                 break
 
-    # Close any open trade at EOD
     if active_trade:
         side_map = ce_1m_map if active_trade["side"] == "CE" else pe_1m_map
         exit_c = side_map.get("15:15") or side_map.get("15:14") or side_map.get("15:10")
@@ -222,6 +241,109 @@ def simulate_vwap_day(ce_1m, pe_1m):
                        "exit_time": "15:15", "exit_reason": "TIME_EXIT", "pnl": round(pnl, 2)})
 
     return trades
+
+
+# ─── VWAP SIMULATION (independent sides) ────────────────────────────────────
+def _simulate_one_side(side, candles_2m, candles_1m_map):
+    """Run VWAP trigger/entry/SL logic for a single side (CE or PE)."""
+    trades = []
+    active = None  # {"entry", "sl", "entry_time"}
+    pending = None  # {"candle", "trigger_price", "expected_idx"}
+
+    for idx in range(1, len(candles_2m)):
+        c = candles_2m[idx]
+        cur_time = c["time"]
+
+        if cur_time >= "14:30" and not active:
+            break
+
+        # Monitor active trade SL via 1-min candles
+        if active:
+            h, m = int(cur_time[:2]), int(cur_time[3:])
+            sl_hit = False
+            for check_min in [m - 1, m]:
+                t = f"{h:02d}:{check_min:02d}"
+                c1m = candles_1m_map.get(t)
+                if c1m and float(c1m["high"]) >= active["sl"]:
+                    pnl = active["entry"] - active["sl"]
+                    trades.append({"side": side, "entry": active["entry"], "sl": active["sl"],
+                                   "entry_time": active["entry_time"],
+                                   "exit": active["sl"], "exit_time": t,
+                                   "exit_reason": "SL_HIT", "pnl": round(pnl, 2)})
+                    active = pending = None
+                    sl_hit = True
+                    break
+            if sl_hit:
+                pass  # fall through to check new triggers
+            elif cur_time >= "15:14":
+                exit_c = candles_1m_map.get("15:14") or candles_1m_map.get("15:15")
+                exit_p = float(exit_c["close"]) if exit_c else active["entry"]
+                pnl = active["entry"] - exit_p
+                trades.append({"side": side, "entry": active["entry"], "sl": active["sl"],
+                               "entry_time": active["entry_time"],
+                               "exit": exit_p, "exit_time": "15:15",
+                               "exit_reason": "TIME_EXIT", "pnl": round(pnl, 2)})
+                active = None
+                continue
+            else:
+                continue
+
+        # Check pending trigger entry
+        if pending and pending["expected_idx"] == idx:
+            if c["close"] < pending["trigger_price"]:
+                entry_price = c["close"]
+                sl = max(pending["candle"]["high"], entry_price + MIN_SL)
+                active = {"entry": entry_price, "sl": sl, "entry_time": c["time"]}
+                pending = None
+                continue
+            else:
+                pending = None
+
+        if active:
+            continue
+        if cur_time >= "14:30":
+            break
+
+        # Check trigger
+        vwap = calc_vwap(candles_2m[:idx + 1])
+        if vwap > 0 and c["close"] < vwap:
+            pending = {"candle": c, "trigger_price": c["low"], "expected_idx": idx + 1}
+
+    # Close open trade at EOD
+    if active:
+        exit_c = candles_1m_map.get("15:15") or candles_1m_map.get("15:14") or candles_1m_map.get("15:10")
+        exit_p = float(exit_c["close"]) if exit_c else active["entry"]
+        pnl = active["entry"] - exit_p
+        trades.append({"side": side, "entry": active["entry"], "sl": active["sl"],
+                       "entry_time": active["entry_time"],
+                       "exit": exit_p, "exit_time": "15:15",
+                       "exit_reason": "TIME_EXIT", "pnl": round(pnl, 2)})
+
+    return trades
+
+
+def simulate_vwap_day_independent(ce_1m, pe_1m):
+    ce_2m = aggregate_2min(ce_1m)
+    pe_2m = aggregate_2min(pe_1m)
+    if len(ce_2m) < 2 or len(pe_2m) < 2:
+        return []
+
+    ce_1m_map = {parse_time(c["datetime"]): c for c in ce_1m}
+    pe_1m_map = {parse_time(c["datetime"]): c for c in pe_1m}
+
+    ce_trades = _simulate_one_side("CE", ce_2m, ce_1m_map)
+    pe_trades = _simulate_one_side("PE", pe_2m, pe_1m_map)
+
+    # Merge and sort by entry time
+    all_trades = ce_trades + pe_trades
+    all_trades.sort(key=lambda t: t["entry_time"])
+    return all_trades
+
+
+def simulate_vwap_day(ce_1m, pe_1m):
+    if INDEPENDENT_SIDES:
+        return simulate_vwap_day_independent(ce_1m, pe_1m)
+    return simulate_vwap_day_locked(ce_1m, pe_1m)
 
 
 # ─── MAIN ──────────────────────────────────────────────────────────────────────
@@ -316,7 +438,8 @@ def main():
 
     # ── SUMMARY ──
     print(f"\n{'═'*80}")
-    print("BACKTEST: VWAP SHORT OPTIONS — NIFTY (1 Year, Weekly Expiry)")
+    mode = "Independent Sides" if INDEPENDENT_SIDES else "Side Locked"
+    print(f"BACKTEST: VWAP SHORT OPTIONS — NIFTY (1 Year, Weekly Expiry, {mode})")
     print(f"{'═'*80}")
     print(f"\nPeriod: {FROM_DATE} to {TO_DATE}")
     print(f"Days: {len(trading_days)} | Thu skip: {days_skipped} | No data: {days_no_data}")
@@ -375,7 +498,7 @@ def main():
 
     with open("results.json", "w") as f:
         json.dump({"trades": all_trades}, f, indent=2)
-    print(f"\nSaved to results.json | API calls: {call_count}")
+    print(f"\nSaved to results.json | API calls: {call_count} | Cache hits: {cache_hits}")
 
 
 main()

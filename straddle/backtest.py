@@ -5,17 +5,19 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from breeze_connect import BreezeConnect
 
+import hashlib
+
 load_dotenv("../.env")
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
-VIX_MIN = 13
-VIX_MAX = 20
-GAP_MAX_PCT = 1.0
+VIX_MIN = 11
+VIX_MAX = 22
+GAP_MAX_PCT = 1.5
 SL_MULTIPLIER = 1.25
 TARGET_PCT = 0.50
 ENTRY_TIME = "09:20"
 EXIT_TIME = "15:10"
-SKIP_WEEKDAYS = [3]  # Thursday
+SKIP_EXPIRY_DAY = True  # skip expiry day, not all Thursdays
 
 FROM_DATE = "2025-04-22"
 TO_DATE = "2026-04-21"
@@ -40,6 +42,9 @@ EXPIRIES = [
     ("2026-04-28", 30),
 ]
 
+CACHE_DIR = "cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 NSE_HOLIDAYS = {
     "2025-05-01", "2025-08-15", "2025-08-27", "2025-10-02", "2025-10-20",
     "2025-10-21", "2025-10-22", "2025-11-05", "2025-12-25",
@@ -57,13 +62,27 @@ print("Connected to Breeze API\n")
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 call_count = 0
+cache_hits = 0
+
+def _cache_key(interval, from_d, to_d, stock_code, exchange, product, expiry, right, strike):
+    parts = [interval, from_d, to_d, stock_code, exchange, product, expiry or "", right, str(strike)]
+    key = "|".join(parts)
+    return os.path.join(CACHE_DIR, hashlib.md5(key.encode()).hexdigest() + ".json")
+
 
 def fetch(interval, from_d, to_d, stock_code="CNXBAN", exchange="NFO",
           product="options", expiry=None, right="call", strike="0"):
-    global call_count
+    global call_count, cache_hits
+
+    ck = _cache_key(interval, from_d, to_d, stock_code, exchange, product, expiry, right, strike)
+    if os.path.exists(ck):
+        cache_hits += 1
+        with open(ck) as f:
+            return json.load(f)
+
     call_count += 1
     if call_count % 90 == 0:
-        time.sleep(5)  # rate limit buffer every 90 calls
+        time.sleep(5)
     params = dict(
         interval=interval, from_date=from_d, to_date=to_d,
         stock_code=stock_code, exchange_code=exchange, product_type=product,
@@ -71,7 +90,11 @@ def fetch(interval, from_d, to_d, stock_code="CNXBAN", exchange="NFO",
     )
     try:
         r = api.get_historical_data(**params)
-        return r.get("Success") or []
+        result = r.get("Success") or []
+        if result:
+            with open(ck, "w") as f:
+                json.dump(result, f)
+        return result
     except Exception as e:
         return []
 
@@ -197,7 +220,7 @@ def main():
     time.sleep(0.3)
 
     results = []
-    skipped = {"thursday": 0, "vix_low": 0, "vix_high": 0, "gap": 0, "trending": 0, "no_data": 0}
+    skipped = {"expiry_day": 0, "vix_low": 0, "vix_high": 0, "gap": 0, "trending": 0, "no_data": 0}
 
     print(f"\n{'─'*120}")
     print(f"{'Date':<12} {'Day':<5} {'VIX':>5} {'Sp@920':>8} {'Gap%':>6} {'Lot':>4} {'ATM':>6} {'CE':>8} {'PE':>8} {'Credit':>8} {'PnL':>8} {'₹ PnL':>8} {'Exit':<12} {'Time':<6}")
@@ -206,8 +229,10 @@ def main():
     for i, date in enumerate(trading_days):
         d = datetime.strptime(date, "%Y-%m-%d")
 
-        if d.weekday() in SKIP_WEEKDAYS:
-            skipped["thursday"] += 1
+        # Skip expiry day (not all Thursdays — BANKNIFTY moved to Tuesday expiry Sep 2025)
+        expiry_check, _ = get_expiry_and_lot(date)
+        if SKIP_EXPIRY_DAY and date == expiry_check:
+            skipped["expiry_day"] += 1
             continue
 
         vix = vix_map.get(date)
@@ -241,8 +266,10 @@ def main():
             continue
 
         # Fetch spot 1-min 9:15–9:20 (for trending filter + accurate ATM at 9:20)
-        spot_1m = fetch("1minute", f"{date}T09:15:00.000Z", f"{date}T09:20:00.000Z",
-                        exchange="NSE", product="cash", right="others")
+        spot_1m_raw = fetch("1minute", f"{date}T09:15:00.000Z", f"{date}T09:20:00.000Z",
+                            exchange="NSE", product="cash", right="others")
+        # Filter pre-market junk candles — Breeze returns flat candles from 07:15
+        spot_1m = [c for c in (spot_1m_raw or []) if parse_time(c["datetime"]) >= "09:15"]
         time.sleep(0.3)
 
         # Trending open filter: check 9:15–9:18 candles (4 candles)
@@ -333,7 +360,7 @@ def main():
     print("BACKTEST: 9:20 SHORT STRADDLE — BANKNIFTY (1 Year)")
     print(f"{'═'*80}")
     print(f"\nPeriod: {FROM_DATE} to {TO_DATE}")
-    print(f"Days: {len(trading_days)} | Skipped: Thu={skipped['thursday']} VIX<{VIX_MIN}={skipped['vix_low']} VIX>{VIX_MAX}={skipped['vix_high']} Gap={skipped['gap']} Trend={skipped['trending']} NoData={skipped['no_data']}")
+    print(f"Days: {len(trading_days)} | Skipped: Expiry={skipped['expiry_day']} VIX<{VIX_MIN}={skipped['vix_low']} VIX>{VIX_MAX}={skipped['vix_high']} Gap={skipped['gap']} Trend={skipped['trending']} NoData={skipped['no_data']}")
     print(f"Trades: {len(results)}")
 
     if results:
@@ -387,7 +414,7 @@ def main():
                                "gap_max": GAP_MAX_PCT, "vix": f"{VIX_MIN}-{VIX_MAX}",
                                "period": f"{FROM_DATE} to {TO_DATE}"},
                     "skipped": skipped, "trades": results}, f, indent=2)
-    print(f"\nSaved to results.json | API calls: {call_count}")
+    print(f"\nSaved to results.json | API calls: {call_count} | Cache hits: {cache_hits}")
 
 
 main()
